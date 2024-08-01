@@ -25,8 +25,15 @@
 #include <string.h>
 #include "picoquic_internal.h"
 #include "tls_api.h"
+#include "globals.h"
+#include "wrapper.h"
 
 static const size_t challenge_length = 8;
+
+uint64_t new_ack_on_path0 = 0;
+uint64_t new_ack_on_path1 = 0;
+bool acked_path0 = false;
+bool acked_path1 = false;
 
 int picoquic_process_ack_of_max_data_frame(picoquic_cnx_t* cnx, const uint8_t* bytes,
     size_t bytes_max, size_t* consumed);
@@ -3530,6 +3537,13 @@ const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* byt
                 if (packet_data != NULL) {
                     packet_data->last_ack_delay = ack_delay;
                 }
+                if (ack_path->unique_path_id == 0) {
+                    new_ack_on_path0 = largest;
+                    acked_path0 = true;
+                } else if (ack_path->unique_path_id == 1) {
+                    new_ack_on_path1 = largest;
+                    acked_path1 = true;
+                }
             }
 
             do {
@@ -3544,6 +3558,15 @@ const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* byt
                 }
 
                 range++;
+                uint64_t actual_current_time = picoquic_current_time();
+                if (acked_path0 == true && cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+                    acked_path0 = false;
+                    FTRL_passACK(0, new_ack_on_path0, range, actual_current_time); 
+                }
+                if (acked_path1 == true && cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+                    acked_path1 = false;
+                    FTRL_passACK(1, new_ack_on_path1, range, actual_current_time);
+                }
                 if (largest + 1 < range) {
                     DBG_PRINTF("ack range error: largest=%" PRIx64 ", range=%" PRIx64, largest, range);
                     picoquic_connection_error(cnx, PICOQUIC_TRANSPORT_FRAME_FORMAT_ERROR, first_byte);

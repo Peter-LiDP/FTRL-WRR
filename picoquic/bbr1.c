@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cc_common.h"
+#include "globals.h"
 
 /*
 Implementation of the BBR1 algorithm, tuned for Picoquic.
@@ -397,6 +398,13 @@ static void picoquic_bbr1_init(picoquic_cnx_t * cnx, picoquic_path_t* path_x, ui
     path_x->congestion_alg_state = (void*)bbr1_state;
     if (bbr1_state != NULL) {
         picoquic_bbr1_reset(bbr1_state, path_x, current_time, cnx->quic->wifi_shadow_rtt);
+    }
+    
+    if (path_x->unique_path_id == 0) {
+        path0init = true;
+    }
+    if (path_x->unique_path_id == 1) {
+        path1init = true;
     }
 }
 
