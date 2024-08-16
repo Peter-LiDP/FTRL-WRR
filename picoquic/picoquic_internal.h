@@ -1185,6 +1185,13 @@ typedef struct st_picoquic_crypto_context_t {
     void* pn_dec; /* Used for PN decryption */
 } picoquic_crypto_context_t;
 
+/*typedef struct packet_stream_offset_map_t {
+    uint64_t packet_number;
+    uint64_t stream_id;
+    uint64_t offset;
+    struct packet_stream_offset_map_t* next;
+} packet_stream_offset_map_t;*/
+
 /*
 * Per connection context.
 */
@@ -1793,8 +1800,9 @@ int picoquic_check_frame_needs_repeat(picoquic_cnx_t* cnx, const uint8_t* bytes,
     int* no_need_to_repeat, int* do_not_detect_spurious, int *is_preemptive_needed);
 uint8_t* picoquic_format_available_stream_frames(picoquic_cnx_t* cnx, picoquic_path_t * path_x,
     uint8_t* bytes_next, uint8_t* bytes_max, uint64_t current_priority,
-    int* more_data, int* is_pure_ack, int* stream_tried_and_failed, int* ret);
-
+    int* more_data, int* is_pure_ack, int* stream_tried_and_failed, int* ret, uint64_t packet_number);
+//packet_stream_offset_map_t* find_mapping(uint64_t packet_number)
+ 
 /* Handling of stream_data_frames that need repeating.
  */
 void picoquic_queue_data_repeat_init(picoquic_cnx_t* cnx);

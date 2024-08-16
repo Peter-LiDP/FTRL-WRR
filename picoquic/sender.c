@@ -24,6 +24,13 @@
 #include "tls_api.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include "globals.h"
+#include "blest.h"
+
+bool this_end_is_sender;
+bool path0init;
+bool path1init;
 
 /*
  * Sending logic.
@@ -912,34 +919,40 @@ static void picoquic_update_pacing_bucket(picoquic_path_t * path_x, uint64_t cur
  * if at least N packets are received.
  */
 int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path_t * path_x, uint64_t current_time, uint64_t * next_time)
-{
+{ 
     int ret = 1;
-
     picoquic_update_pacing_bucket(path_x, current_time);
-
-    if (path_x->pacing_bucket_nanosec < path_x->pacing_packet_time_nanosec) {
-        uint64_t next_pacing_time;
-        int64_t bucket_required;
-        
-        if (cnx->quic->packet_train_mode || path_x->pacing_bandwidth_pause) {
-            bucket_required = path_x->pacing_bucket_max;
-
-            if (bucket_required > 10 * path_x->pacing_packet_time_nanosec) {
-                bucket_required = 10 * path_x->pacing_packet_time_nanosec;
+    bool sending_ok = false;
+    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+        uint64_t current_path = path_x->unique_path_id;
+        uint64_t another_path = (current_path == 0) ? 1 : 0;
+        bool congest_current = (path_x->bytes_in_transit >= path_x->cwin);
+        bool congest_another = (cnx->path[another_path]->bytes_in_transit >= cnx->path[another_path]->cwin);
+        if (cnx->path[current_path]->rtt_sample <= cnx->path[another_path]->rtt_sample) {
+            if (!congest_current) {
+                sending_ok = true;
             }
-            
-            bucket_required -= path_x->pacing_bucket_nanosec;
+        } else if (cnx->path[current_path]->rtt_sample > cnx->path[another_path]->rtt_sample) {
+            if (congest_another) {
+                double rtts = (double)cnx->path[current_path]->rtt_sample / cnx->path[another_path]->rtt_sample;
+                double cwnd_f = (double)cnx->path[another_path]->cwin / cnx->path[another_path]->send_mtu;
+                double X = cnx->path[another_path]->send_mtu * rtts * (cwnd_f + (rtts - 1) / 2.0);
+                double X_2 = cnx->maxdata_remote - (cnx->path[current_path]->bytes_in_transit + cnx->path[current_path]->send_mtu);
+                double lambda = 1.0 + 0.001 * var_blest;
+                if (lambda*X <= X_2) { 
+		    sending_ok = true;
+                }
+            }
         }
-        else {
-            bucket_required = path_x->pacing_packet_time_nanosec - path_x->pacing_bucket_nanosec;
-        }
-
-        next_pacing_time = current_time + 1 + bucket_required / 1000;
-        if (next_pacing_time < *next_time) {
-            path_x->pacing_bandwidth_pause = 0;
-            *next_time = next_pacing_time;
-            SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
-        }
+    }
+    
+    if (sending_ok || !this_end_is_sender) { 
+        ret = 1;
+    }
+    else {
+        path_x->pacing_bandwidth_pause = 0;
+        *next_time = current_time;
+        SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
         ret = 0;
     }
 
@@ -1816,7 +1829,7 @@ int picoquic_prepare_packet_0rtt(picoquic_cnx_t* cnx, picoquic_path_t * path_x, 
 
         /* Encode the stream frame, or frames */
         bytes_next = picoquic_format_available_stream_frames(cnx, NULL, bytes_next, bytes_max, UINT64_MAX,
-            &more_data, &is_pure_ack, &stream_tried_and_failed, &ret);
+            &more_data, &is_pure_ack, &stream_tried_and_failed, &ret, packet->sequence_number);
 
         length = bytes_next - bytes;
 
@@ -3051,7 +3064,7 @@ static uint8_t* picoquic_prepare_datagram_ready(picoquic_cnx_t* cnx, picoquic_pa
 */
 
 static uint8_t* picoquic_prepare_stream_and_datagrams(picoquic_cnx_t* cnx, picoquic_path_t* path_x, uint8_t* bytes_next, uint8_t* bytes_max,
-    int* more_data, int* is_pure_ack, int* no_data_to_send, int* ret)
+    int* more_data, int* is_pure_ack, int* no_data_to_send, int* ret, picoquic_packet_t* packet)
 {
     int datagram_sent = 0;
     int datagram_tried_and_failed = 0;
@@ -3125,7 +3138,7 @@ static uint8_t* picoquic_prepare_stream_and_datagrams(picoquic_cnx_t* cnx, picoq
             uint8_t* bytes_first = bytes_next;
             if (bytes_next + 8 < bytes_max) {
                 bytes_next = picoquic_format_available_stream_frames(cnx, path_x, bytes_next, bytes_max, UINT64_MAX,
-                    &more_data_this_round, is_pure_ack, &stream_tried_and_failed, ret);
+                    &more_data_this_round, is_pure_ack, &stream_tried_and_failed, ret, packet->sequence_number);
                 if (bytes_next > bytes_first) {
                     cnx->datagram_conflicts_count = 0;
                     something_sent = 1;
@@ -3338,7 +3351,7 @@ int picoquic_prepare_packet_almost_ready(picoquic_cnx_t* cnx, picoquic_path_t* p
                             }
                             if (ret == 0) {
                                 bytes_next = picoquic_prepare_stream_and_datagrams(cnx, path_x, bytes_next, bytes_max,
-                                    &more_data, &is_pure_ack, &no_data_to_send, &ret);
+                                    &more_data, &is_pure_ack, &no_data_to_send, &ret, packet);
                             }
                             /* TODO: replace this by posting of frame when CWIN estimated */
                             /* Send bdp frames if there are no stream frames to send
@@ -3678,7 +3691,7 @@ int picoquic_prepare_packet_ready(picoquic_cnx_t* cnx, picoquic_path_t* path_x, 
                         }
                         if (ret == 0) {
                             bytes_next = picoquic_prepare_stream_and_datagrams(cnx, path_x, bytes_next, bytes_max,
-                                &more_data, &is_pure_ack, &no_data_to_send, &ret);
+                                &more_data, &is_pure_ack, &no_data_to_send, &ret, packet);
                         }
 
                         /* TODO: replace this by scheduling of BDP frame when window has been estimated */
@@ -4223,6 +4236,23 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
             SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
         }
         path_id = 0;
+    }
+    
+    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2 && path0init && path1init) {
+        int f, s;
+	if (cnx->path[0]->rtt_sample >= cnx->path[1]->rtt_sample) {
+            f = 1;
+            s = 0;
+	} else {
+            f = 0;
+            s = 1;
+	}
+	if (cnx->path[f]->bytes_in_transit < cnx->path[f]->cwin) { 
+            path_id = f;
+	} else {
+            path_id = s;    
+	}
+        this_end_is_sender = true;
     }
 
     cnx->path[path_id]->selected++;

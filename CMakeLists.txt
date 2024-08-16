@@ -301,7 +301,8 @@ macro(set_picoquic_compile_settings)
     target_link_options(${ARGV0} PRIVATE ${PICOQUIC_LINKER_FLAGS})
 endmacro()
 
-
+add_library(blest picoquic/blest.cpp)
+target_include_directories(blest PUBLIC picoquic)
 add_library(picoquic-core ${PICOQUIC_CORE_HEADERS} ${PICOQUIC_LIBRARY_FILES})
 target_include_directories(picoquic-core
     PRIVATE
@@ -314,6 +315,7 @@ target_link_libraries(picoquic-core
     PRIVATE
         ${OPENSSL_LIBRARIES}
         ${MBEDTLS_LIBRARIES}
+        blest
     PUBLIC
         ${PTLS_LIBRARIES}
         Threads::Threads)
@@ -334,6 +336,7 @@ target_link_libraries(picohttp-core
         ${PTLS_LIBRARIES}
         ${OPENSSL_LIBRARIES}
         ${MBEDTLS_LIBRARIES}
+        blest
     PUBLIC
         picoquic-core)
 target_include_directories(picohttp-core
@@ -354,12 +357,13 @@ target_link_libraries(picoquicdemo
         ${MBEDTLS_LIBRARIES}
         picoquic-log
         picoquic-core
-        picohttp-core)
+        picohttp-core
+        blest)
 target_include_directories(picoquicdemo PRIVATE picohttp)
 set_picoquic_compile_settings(picoquicdemo)
 
 add_executable(picolog_t picolog/picolog.c)
-target_link_libraries(picolog_t PRIVATE picoquic-log picoquic-core)
+target_link_libraries(picolog_t PRIVATE picoquic-log picoquic-core blest)
 target_include_directories(picolog_t PRIVATE loglib)
 set_picoquic_compile_settings(picolog_t)
 
@@ -368,7 +372,7 @@ include(CTest)
 if(BUILD_TESTING AND picoquic_BUILD_TESTS)
 
     add_library(picoquic-test STATIC ${PICOQUIC_TEST_LIBRARY_FILES})
-    target_link_libraries(picoquic-test PUBLIC picoquic-core picoquic-log)
+    target_link_libraries(picoquic-test PUBLIC picoquic-core picoquic-log blest)
     target_include_directories(picoquic-test
         PRIVATE
             ${MBEDTLS_INCLUDE_DIRS}
@@ -379,18 +383,18 @@ if(BUILD_TESTING AND picoquic_BUILD_TESTS)
     set_picoquic_compile_settings(picoquic-test)
 
     add_executable(picoquic_ct picoquic_t/picoquic_t.c)
-    target_link_libraries(picoquic_ct PRIVATE picoquic-test ${MBEDTLS_LIBRARIES})
+    target_link_libraries(picoquic_ct PRIVATE picoquic-test ${MBEDTLS_LIBRARIES} blest)
     set_picoquic_compile_settings(picoquic_ct)
 
     add_executable(picohttp_ct
         picohttp_t/picohttp_t.c
         ${PICOHTTP_TEST_LIBRARY_FILES})
-    target_link_libraries(picohttp_ct PRIVATE picohttp-core picoquic-test)
+    target_link_libraries(picohttp_ct PRIVATE picohttp-core picoquic-test blest)
     target_include_directories(picohttp_ct PRIVATE picohttp)
     set_picoquic_compile_settings(picohttp_ct)
 
     add_executable(pico_baton baton_app/baton_app.c)
-    target_link_libraries(pico_baton PRIVATE picoquic-log picoquic-core picohttp-core)
+    target_link_libraries(pico_baton PRIVATE picoquic-log picoquic-core picohttp-core blest)
     target_include_directories(pico_baton PRIVATE loglib picoquic picohttp)
     set_picoquic_compile_settings(pico_baton)
 
@@ -398,7 +402,7 @@ if(BUILD_TESTING AND picoquic_BUILD_TESTS)
         sample/sample.c
         sample/sample_client.c
         sample/sample_server.c)
-    target_link_libraries(picoquic_sample PRIVATE picoquic-log picoquic-core)
+    target_link_libraries(picoquic_sample PRIVATE picoquic-log picoquic-core blest)
     target_include_directories(picoquic_sample PRIVATE loglib picoquic)
     set_picoquic_compile_settings(picoquic_sample)
 
@@ -409,7 +413,7 @@ if(BUILD_TESTING AND picoquic_BUILD_TESTS)
 
     add_executable(thread_test
         thread_tester/thread_test.c)
-    target_link_libraries(thread_test PRIVATE picoquic-log picoquic-core)
+    target_link_libraries(thread_test PRIVATE picoquic-log picoquic-core blest)
     target_include_directories(thread_test PRIVATE loglib picoquic)
     set_picoquic_compile_settings(thread_test)
 
