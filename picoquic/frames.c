@@ -1,15 +1,15 @@
 #include "picoquic.h"
 /*
 * Author: Christian Huitema
-* Copyright (c) 2017, Private Octopus, Inc.
+* Copyright (c) 2017, Private Octopus, Inc. 
 * All rights reserved.
-*
+* 
 * Permission to use, copy, modify, and distribute this software for any
 * purpose with or without fee is hereby granted, provided that the above
 * copyright notice and this permission notice appear in all copies.
 *
-* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
+* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
 * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
 * DISCLAIMED. IN NO EVENT SHALL Private Octopus, Inc. BE LIABLE FOR ANY
 * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
@@ -23,10 +23,17 @@
 /* Decoding of the various frames, and application to context */
 #include <stdlib.h>
 #include <string.h>
-#include "picoquic_internal.h"
+#include "picoquic_internal.h" 
 #include "tls_api.h"
+#include <stdbool.h>
+#include "globals.h"
+#include "wrapper.h"
 
 static const size_t challenge_length = 8;
+uint64_t new_ack_on_path0 = 0;
+uint64_t new_ack_on_path1 = 0;
+bool acked_path0 = false;
+bool acked_path1 = false;
 
 int picoquic_process_ack_of_max_data_frame(picoquic_cnx_t* cnx, const uint8_t* bytes,
     size_t bytes_max, size_t* consumed);
@@ -1223,6 +1230,9 @@ picoquic_stream_head_t* picoquic_find_ready_stream_path(picoquic_cnx_t* cnx, pic
     while (stream != NULL) {
         int has_data = 0;
         picoquic_stream_head_t* next_stream = stream->next_output_stream;
+        /*if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+            printf("Stream ID: %" PRIu64 ", Priority: %d\n", stream->stream_id, stream->stream_priority);
+        }*/
 
         if (found_stream != NULL && stream->stream_priority > found_stream->stream_priority) {
             /* All the streams at that priority level have been examined,
@@ -1786,13 +1796,13 @@ int64_t picoquic_queue_data_repeat_compare(void* l, void* r)
                 /* largest length goes in front */
                 ret = rp->data_repeat_stream_data_length - lp->data_repeat_stream_data_length;
             }
-        }
+        } 
     }
 
     return ret;
 }
 
-void picoquic_queue_data_repeat_delete(void* tree, picosplay_node_t* node)
+void picoquic_queue_data_repeat_delete(void* tree, picosplay_node_t* node) 
 {
     /* Packets can be queued simultaneously for data repeat and 
     * for detection of spurious losses, so should only be recycled
@@ -2478,7 +2488,7 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
             path_x->delivered_last = path_x->delivered;
             path_x->delivered_time_last = delivery_time;
             path_x->delivered_sent_last = send_time;
-        }
+        } 
         else {
             uint64_t receive_interval = delivery_time - delivered_time_prior;
 
@@ -2597,7 +2607,7 @@ static uint64_t picoquic_compute_packets_in_window(picoquic_cnx_t* cnx, uint64_t
         nb_packets = (rtt_packets_times_1000000 + 999999) / 1000000;
     }
     if (nb_packets < 2) {
-        nb_packets = 2;
+        nb_packets = 2; 
     }
     return nb_packets;
 }
@@ -3371,7 +3381,7 @@ void picoquic_process_ack_of_frames(picoquic_cnx_t* cnx, picoquic_packet_t* p,
                     if (cnx->callback_fn != NULL) {
                         uint8_t frame_id;
                         uint64_t content_length;
-                        uint8_t* content_bytes;
+                        uint8_t* content_bytes; 
 
                         /* Parse and skip type and length */
                         content_bytes = picoquic_decode_datagram_frame_header(&p->bytes[byte_index], &p->bytes[p->length],
@@ -3469,7 +3479,7 @@ static int picoquic_process_ack_range(
     return ret;
 }
 
-const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* bytes,
+const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* bytes, 
     const uint8_t* bytes_max, uint64_t current_time, int epoch, int is_ecn, int has_path_id, picoquic_packet_data_t* packet_data)
 {
     uint64_t path_id = 0;
@@ -3477,7 +3487,7 @@ const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* byt
     uint64_t largest;
     uint64_t ack_delay;
     size_t   consumed;
-    picoquic_packet_context_enum pc = picoquic_context_from_epoch(epoch);
+    picoquic_packet_context_enum pc = picoquic_context_from_epoch(epoch); 
     uint64_t ecnx3[3] = { 0, 0, 0 };
     uint8_t first_byte = bytes[0];
     picoquic_packet_context_t* pkt_ctx = &cnx->pkt_ctx[pc];
@@ -3530,6 +3540,14 @@ const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* byt
                 if (packet_data != NULL) {
                     packet_data->last_ack_delay = ack_delay;
                 }
+                uint64_t rtt = current_time - top_packet->send_time;
+                if (ack_path->unique_path_id == 0) {
+                    new_ack_on_path0 = largest;
+                    acked_path0 = true;
+                } else if (ack_path->unique_path_id == 1) {
+                    new_ack_on_path1 = largest;
+                    acked_path1 = true;
+                }
             }
 
             do {
@@ -3544,6 +3562,15 @@ const uint8_t* picoquic_decode_ack_frame(picoquic_cnx_t* cnx, const uint8_t* byt
                 }
 
                 range++;
+                uint64_t actual_current_time = picoquic_current_time();
+                if (acked_path0 == true && cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+                    acked_path0 = false;
+                    LinUCB_passACK(0, new_ack_on_path0, range, actual_current_time); 
+                }
+                if (acked_path1 == true && cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+                    acked_path1 = false;
+                    LinUCB_passACK(1, new_ack_on_path1, range, actual_current_time);
+                }
                 if (largest + 1 < range) {
                     DBG_PRINTF("ack range error: largest=%" PRIx64 ", range=%" PRIx64, largest, range);
                     picoquic_connection_error(cnx, PICOQUIC_TRANSPORT_FRAME_FORMAT_ERROR, first_byte);
@@ -4165,7 +4192,7 @@ uint8_t * picoquic_format_required_max_stream_data_frames(picoquic_cnx_t* cnx,
     uint8_t* bytes, uint8_t * bytes_max, int * more_data, int * is_pure_ack)
 {
     uint8_t* bytes0;
-    picoquic_stream_head_t* stream = picoquic_first_stream(cnx);
+    picoquic_stream_head_t* stream = picoquic_first_stream(cnx); 
 
     while (stream != NULL) {
         if (!stream->fin_received) {

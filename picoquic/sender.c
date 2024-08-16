@@ -4,14 +4,14 @@
 * All rights reserved.
 *
 * Permission to use, copy, modify, and distribute this software for any
-* purpose with or without fee is hereby granted, provided that the above
+* purpose with or without fee is hereby granted, provided that the above 
 * copyright notice and this permission notice appear in all copies.
 *
-* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
 * DISCLAIMED. IN NO EVENT SHALL Private Octopus, Inc. BE LIABLE FOR ANY
-* DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+* DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES 
 * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
 * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
@@ -24,6 +24,33 @@
 #include "tls_api.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include "globals.h"
+#include "wrapper.h"
+#include <time.h>
+#include <math.h>
+#define max(a, b) ((a) > (b) ? (a) : (b))
+
+bool stop_at_next_round;
+bool is_initialized;
+double learning_bytes;
+double gamma_s = 0.5;
+bool stop_collect;
+uint64_t Tref;
+bool enter_learning;
+uint64_t path0mtu;
+uint64_t path1mtu;
+uint64_t highest_bandwidth0;
+uint64_t highest_bandwidth1;
+bool begin;
+bool path0init;
+bool path1init;
+int packets_sending;
+bool testing = true;
+bool start_time_checking = true;
+uint64_t start_time;
+int current_handling_timestep;
+bool this_end_is_sender;
 
 /*
  * Sending logic.
@@ -873,6 +900,68 @@ static size_t picoquic_protect_packet(picoquic_cnx_t* cnx,
             send_buffer[pn_offset+i] ^= mask_bytes[i+1];
         }
     }
+    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2 && learning == true) {
+        uint64_t actual_current_time = picoquic_current_time();
+        if (path_x->unique_path_id == 0) {
+            if (this_end_is_sender) {
+                mapPacketNumberToCurrentTimeStep(0, sequence_number, current_timestep, (double)send_length, actual_current_time, gamma_s);
+                learning_bytes += (double)send_length;
+            }
+        }
+        if (path_x->unique_path_id == 1) {
+            if (this_end_is_sender) {
+                mapPacketNumberToCurrentTimeStep(1, sequence_number, current_timestep, (double)send_length, actual_current_time, gamma_s);  
+                learning_bytes += (double)send_length;
+            }
+        }
+        if (this_end_is_sender) {
+            if (!enter_learning) {
+                enter_learning = true;
+                start_time = actual_current_time;
+                int f, s;
+	        if (cnx->path[0]->rtt_sample > cnx->path[1]->rtt_sample) {
+	            f = 1;
+	            s = 0;
+	        } else {
+	            f = 0;
+	            s = 1;
+	        }
+                Tref = max(2 * (cnx->path[f]->rtt_sample + cnx->path[f]->rtt_variant), cnx->path[s]->rtt_sample + cnx->path[s]->rtt_variant);
+            }
+            uint64_t time_gap = actual_current_time - start_time;
+            //printf("3*Tref: %ld\n", 3*Tref);
+            //printf("time_gap: %ld\n", time_gap);
+            if (time_gap >= 0 && time_gap <= Tref && !stop_collect) {
+                gamma_s = 0.9;
+            }
+            else if (time_gap >= Tref && time_gap <= 2*Tref && !stop_collect) {
+                gamma_s = 0.7;
+            }
+            else if (time_gap >= 2*Tref && time_gap <= 3*Tref && !stop_collect) {
+                gamma_s = 0.5;
+            }
+            else if (time_gap >= 3*Tref && !stop_collect) {
+                if (!stop_at_next_round) {
+                    enter_learning = false;
+                    manual_update();
+                    updateTimestep(current_timestep, actual_current_time);
+                }
+                else {
+                    enter_learning = false;
+                    stop_collect = true;
+                    learning = false;
+                    deployment = true;
+                    learning_bytes = 0;
+                    stop_at_next_round = false;
+                    manual_update();
+                    updateTimestep(current_timestep, actual_current_time);
+                }
+            }
+            if (learning_bytes >= 4000000) {
+                stop_at_next_round = true;
+            }
+        }
+    }
 
     return send_length;
 }
@@ -912,34 +1001,37 @@ static void picoquic_update_pacing_bucket(picoquic_path_t * path_x, uint64_t cur
  * if at least N packets are received.
  */
 int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path_t * path_x, uint64_t current_time, uint64_t * next_time)
-{
+{ 
     int ret = 1;
-
     picoquic_update_pacing_bucket(path_x, current_time);
-
-    if (path_x->pacing_bucket_nanosec < path_x->pacing_packet_time_nanosec) {
-        uint64_t next_pacing_time;
-        int64_t bucket_required;
+    bool sending_ok = false;
+    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+        uint64_t current_path = path_x->unique_path_id;
+        uint64_t another_path = (current_path == 0) ? 1 : 0;
+        bool congest_current = (path_x->bytes_in_transit >= path_x->cwin);
+        bool congest_another = (cnx->path[another_path]->bytes_in_transit >= cnx->path[another_path]->cwin);
         
-        if (cnx->quic->packet_train_mode || path_x->pacing_bandwidth_pause) {
-            bucket_required = path_x->pacing_bucket_max;
-
-            if (bucket_required > 10 * path_x->pacing_packet_time_nanosec) {
-                bucket_required = 10 * path_x->pacing_packet_time_nanosec;
+        if (cnx->path[current_path]->rtt_sample <= cnx->path[another_path]->rtt_sample) {
+            if (!congest_current) {
+                sending_ok = true;
             }
-            
-            bucket_required -= path_x->pacing_bucket_nanosec;
+        } else if (cnx->path[current_path]->rtt_sample > cnx->path[another_path]->rtt_sample) {
+            if (congest_another) {
+                int decision = wait_or_transmit(cnx->path[0]->cwin, cnx->path[0]->bytes_in_transit, cnx->path[0]->rtt_sample, cnx->path[1]->cwin, cnx->path[1]->bytes_in_transit, cnx->path[1]->rtt_sample, cnx->maxdata_remote);
+	        if (decision == 0) {
+	            sending_ok = true;
+	        }
+            }
         }
-        else {
-            bucket_required = path_x->pacing_packet_time_nanosec - path_x->pacing_bucket_nanosec;
-        }
-
-        next_pacing_time = current_time + 1 + bucket_required / 1000;
-        if (next_pacing_time < *next_time) {
-            path_x->pacing_bandwidth_pause = 0;
-            *next_time = next_pacing_time;
-            SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
-        }
+    }
+    
+    if (sending_ok || !this_end_is_sender) { 
+        ret = 1;
+    }
+    else {
+        path_x->pacing_bandwidth_pause = 0;
+        *next_time = current_time;
+        SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
         ret = 0;
     }
 
@@ -4043,6 +4135,13 @@ int picoquic_prepare_segment(picoquic_cnx_t* cnx, picoquic_path_t* path_x, picoq
  * sensitive data is not sent on suspect paths.
  */
 
+void initialize() {
+    if (!is_initialized) {
+        LINUCB_initialize(2); 
+        is_initialized = true; 
+    }
+}
+
 static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_time, uint64_t* next_wake_time)
 {
     int path_id = -1;
@@ -4061,6 +4160,8 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
     int is_ack_needed = 0;
     picoquic_stream_head_t* next_stream = picoquic_find_ready_stream(cnx);
     int affinity_path_id = -1;
+    bool use_challenge_path;
+    initialize();
 
     cnx->last_path_polled++;
     if (cnx->last_path_polled > cnx->nb_paths) {
@@ -4197,6 +4298,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
 
     if (challenge_path >= 0) {
         path_id = challenge_path;
+        use_challenge_path = true;
     }
     else if (is_ack_needed && is_min_rtt_pacing_ok) {
         path_id = i_min_rtt;
@@ -4223,6 +4325,24 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
             SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
         }
         path_id = 0;
+    }
+    
+    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2 && path0init && path1init) {       
+        int f, s;
+        pass_features(cnx->path[0]->cwin, cnx->path[0]->bytes_in_transit, cnx->path[0]->rtt_sample, cnx->path[1]->cwin, cnx->path[1]->bytes_in_transit, cnx->path[1]->rtt_sample, cnx->maxdata_remote);
+	if (cnx->path[0]->rtt_sample > cnx->path[1]->rtt_sample) {
+            f = 1;
+            s = 0;
+	} else {
+            f = 0;
+            s = 1;
+	}
+	if (cnx->path[f]->bytes_in_transit < cnx->path[f]->cwin) { 
+            path_id = f;
+	} else {
+            path_id = s;    
+	}
+        this_end_is_sender = true;
     }
 
     cnx->path[path_id]->selected++;
