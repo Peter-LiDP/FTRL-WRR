@@ -928,7 +928,7 @@ int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path
             if (!congest_current) {   
                 sending_ok = true; 
             }
-        } else if (cnx->path[current_path]->rtt_sample > cnx->path[another_path]->rtt_sample) {   
+        } else {   
             if (congest_another) {  
                 sending_ok = true; 
             }
