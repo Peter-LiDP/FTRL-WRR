@@ -31,6 +31,7 @@
 bool this_end_is_sender;
 bool path0init;
 bool path1init;
+uint64_t offset_sent;
 
 /*
  * Sending logic.
@@ -932,12 +933,20 @@ int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path
             if (!congest_current) {
                 sending_ok = true;
             }
-        } else if (cnx->path[current_path]->rtt_sample > cnx->path[another_path]->rtt_sample) {
+        } else {
             if (congest_another) {
                 double rtts = (double)cnx->path[current_path]->rtt_sample / cnx->path[another_path]->rtt_sample;
                 double cwnd_f = (double)cnx->path[another_path]->cwin / cnx->path[another_path]->send_mtu;
                 double X = cnx->path[another_path]->send_mtu * rtts * (cwnd_f + (rtts - 1) / 2.0);
-                double X_2 = cnx->maxdata_remote - (cnx->path[current_path]->bytes_in_transit + cnx->path[current_path]->send_mtu);
+                double X_2;
+                picoquic_stream_head_t* next_stream = picoquic_find_ready_stream(cnx);
+                if (next_stream == NULL) {
+                    X_2 = cnx->maxdata_remote - offset_sent - (cnx->path[current_path]->bytes_in_transit + cnx->path[current_path]->send_mtu);
+                }
+                else {
+                    offset_sent = next_stream->sent_offset;
+                    X_2 = next_stream->maxdata_remote - offset_sent - (cnx->path[current_path]->bytes_in_transit + cnx->path[current_path]->send_mtu);
+                }
                 double lambda = 1.0 + 0.001 * var_blest;
                 if (lambda*X <= X_2) { 
 		    sending_ok = true;

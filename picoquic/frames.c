@@ -1708,18 +1708,6 @@ uint8_t * picoquic_format_stream_frame(picoquic_cnx_t* cnx, picoquic_stream_head
     return bytes;
 }
 
-/*packet_stream_offset_map_t* find_mapping(uint64_t packet_number) {
-    packet_stream_offset_map_t* current = mapping_head;
-    while (current != NULL) {
-        if (current->packet_number == packet_number) {
-            return current;
-        }
-        current = current->next;
-    }
-    return NULL;
-}*/
-
-
 /* Format all available stream frames that fit in the packet.
  * Update more_data if more stream data is available
  * Update is_pure_ack if formated frames require ack
@@ -1778,8 +1766,6 @@ uint8_t* picoquic_format_available_stream_frames(picoquic_cnx_t* cnx, picoquic_p
     }
 
     *more_data |= more_stream_data;
-    
-    // printf("Total bytes filled into the packet payload: %lu\n", total_bytes_filled);
 
     return bytes_next;
 }
@@ -2534,22 +2520,12 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
                 if (send_interval > receive_interval) {
                     receive_interval = send_interval;
                 }
-                /*if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
-                    printf("Path ID: %ld, Total Packets Sent: %ld\n", path_x->unique_path_id, path_x->path_packet_number);
-                    printf("Path ID: %ld, Total Bytes Lost: %ld\n", path_x->unique_path_id, path_x->total_bytes_lost);
-                }*/
 
                 bw_estimate = delivered * 1000000;
                 bw_estimate /= receive_interval;
-                
-                /*printf("Path ID: %ld, delivered: %ld\n", path_x->unique_path_id, delivered);
-                printf("Path ID: %ld, receive_interval: %ld\n", path_x->unique_path_id, receive_interval);
-                printf("Path ID: %ld, Bandwidth estimate: %ld\n", path_x->unique_path_id, path_x->bandwidth_estimate);
-                printf("Path ID: %ld, Peak Bandwidth estimate: %ld\n", path_x->unique_path_id, path_x->peak_bandwidth_estimate);*/
 
                 if (!rs_is_path_limited || bw_estimate > path_x->bandwidth_estimate) {
                     path_x->bandwidth_estimate = bw_estimate;
-                    //path_x->bandwidth_estimate = 40000000;
                     if (path_x == cnx->path[0]){
                         if (cnx->is_ack_frequency_negotiated) {
                             /* Compute the desired value of the ack frequency*/
@@ -2576,7 +2552,6 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
                 /* Statistics */
                 if (bw_estimate > path_x->bandwidth_estimate_max) {
                     path_x->bandwidth_estimate_max = bw_estimate;
-                    //path_x->bandwidth_estimate_max = 40000000;
                 }
             }
         }
