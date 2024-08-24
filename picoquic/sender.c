@@ -929,8 +929,6 @@ static size_t picoquic_protect_packet(picoquic_cnx_t* cnx,
                 Tref = max(2 * (cnx->path[f]->rtt_sample + cnx->path[f]->rtt_variant), cnx->path[s]->rtt_sample + cnx->path[s]->rtt_variant);
             }
             uint64_t time_gap = actual_current_time - start_time;
-            //printf("3*Tref: %ld\n", 3*Tref);
-            //printf("time_gap: %ld\n", time_gap);
             if (time_gap >= 0 && time_gap <= Tref && !stop_collect) {
                 gamma_s = 0.9;
             }
@@ -1015,7 +1013,7 @@ int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path
             if (!congest_current) {
                 sending_ok = true;
             }
-        } else if (cnx->path[current_path]->rtt_sample > cnx->path[another_path]->rtt_sample) {
+        } else {
             if (congest_another) {
                 int decision = wait_or_transmit(cnx->path[0]->cwin, cnx->path[0]->bytes_in_transit, cnx->path[0]->rtt_sample, cnx->path[1]->cwin, cnx->path[1]->bytes_in_transit, cnx->path[1]->rtt_sample, cnx->maxdata_remote);
 	        if (decision == 0) {
