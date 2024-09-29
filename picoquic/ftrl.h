@@ -23,6 +23,9 @@ public:
     std::map<uint64_t, std::tuple<int, double, bool, uint64_t>> packetNumbertoTimestepMap1;
     std::map<int, std::tuple<uint64_t, bool, bool, double, uint64_t, uint64_t, double, double>> TimestepMap; 
     std::map<int, double> XtAtTimeStep;
+    int reset_t;
+    double sum_g;
+    double sum_g_without_lr;
 
 private:
     double b;
@@ -34,7 +37,6 @@ private:
     double sampleUnitSphere();
     void calculate_lower_xt();
     double R_second_derivative();
-    double sum_g;
     std::vector<double> currentWeights;
     std::vector<double> effectiveWeight;
     std::map<int, double> bAtTimeStep;

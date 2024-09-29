@@ -19,7 +19,7 @@
 * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
+ 
 /* Decoding of the various frames, and application to context */
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +34,7 @@ uint64_t new_ack_on_path0 = 0;
 uint64_t new_ack_on_path1 = 0;
 bool acked_path0 = false;
 bool acked_path1 = false;
+bool bw_update = false;
 
 int picoquic_process_ack_of_max_data_frame(picoquic_cnx_t* cnx, const uint8_t* bytes,
     size_t bytes_max, size_t* consumed);
@@ -2503,6 +2504,15 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
 
                 if (!rs_is_path_limited || bw_estimate > path_x->bandwidth_estimate) {
                     path_x->bandwidth_estimate = bw_estimate;
+                    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
+                        if (path_x->unique_path_id == 0) {
+                            bw_update = true;
+                        }
+                        if (path_x->unique_path_id == 1 && bw_update) {
+                            ADWIN2_passBW(cnx->path[0]->bandwidth_estimate, cnx->path[1]->bandwidth_estimate);
+                            bw_update = false;
+                        }
+                    }
                     if (path_x == cnx->path[0]){
                         if (cnx->is_ack_frequency_negotiated) {
                             /* Compute the desired value of the ack frequency*/

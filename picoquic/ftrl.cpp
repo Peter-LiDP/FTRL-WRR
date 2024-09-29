@@ -15,11 +15,11 @@
 #include "wrapper.h"
 extern "C" {
     bool updated = false;  
-}
+} 
 bool clearQueue = false;
 
 FTRL::FTRL(int numPaths)
-    : numPaths(numPaths), lr(0.99), r(1), t(1), updated_t(1), currentWeights(numPaths, 0){
+    : numPaths(numPaths), lr(0.99), r(1), t(1), reset_t(1), updated_t(1), sum_g(0), sum_g_without_lr(0), currentWeights(numPaths, 0){
     effectiveWeight.resize(numPaths);
     gt = 0;
     totalWeight = 1;
@@ -84,10 +84,11 @@ void FTRL::update(const double loss, int updating_timestep) {
     update_R = RAtTimeStep[updating_timestep];
     bAtTimeStep.erase(updating_timestep);
     RAtTimeStep.erase(updating_timestep);
-    lr = calculate_lr(updating_timestep + 1);
-    r = calculate_r(updating_timestep + 1);
+    lr = calculate_lr(reset_t + 1);
+    r = calculate_r(reset_t + 1);
     gt = (4*loss*update_R*update_b) / (r * r);
-    sum_g += gt*lr;
+    sum_g_without_lr += gt;
+    sum_g = sum_g_without_lr*lr;
     calculate_lower_xt();
         
     R = R_second_derivative(); 
@@ -101,6 +102,7 @@ void FTRL::update(const double loss, int updating_timestep) {
     updated = true;
     clearQueue = true;
     updated_t = t;
+    reset_t++;
 }
 
 std::pair<int, int> FTRL::drawAction() {

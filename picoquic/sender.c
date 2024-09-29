@@ -18,8 +18,8 @@
 * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-#include "picoquic_internal.h"
+ 
+#include "picoquic_internal.h" 
 #include "picoquic_unified_log.h"
 #include "tls_api.h"
 #include <stdlib.h>
@@ -4310,7 +4310,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
         }
         
         
-        if (result.value == 1 && cnx->path[1]->bytes_in_transit > cnx->path[1]->cwin) {  
+        if (result.value == 1 && cnx->path[1]->bytes_in_transit > cnx->path[1]->cwin) {
             path_id = 0;
             if(cnx->path[0]->bytes_in_transit > cnx->path[0]->cwin) {
                 path_id = result.value;
@@ -4319,6 +4319,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
         else if (result.value == 1 && credit1 > 0){
             path_id = result.value;
         }
+        
         this_end_is_sender = true;
 
     }

@@ -14,11 +14,34 @@
 #include "globals.h"
 #include <fstream>
 #include <algorithm>
+#include <deque>
+#include <cmath>
+ 
+struct Bucket {
+    int capacity;
+    double sum;
+    double sum_of_squares;
+
+    Bucket(double value) {
+        capacity = 1;
+        sum = value;
+        sum_of_squares = value * value;
+    }
+
+    Bucket(int cap, double s, double s_squares) {
+        capacity = cap;
+        sum = s;
+        sum_of_squares = s_squares;
+    }
+};
 
 static std::unique_ptr<FTRL> FTRL_instance;
 static std::queue<std::pair<double, int>> lossQueue;
 static std::queue<std::pair<int, int>> actionQueue;
 static std::queue<std::tuple<int, uint64_t, int, uint64_t>> ACKQueue;
+static std::queue<std::pair<uint64_t, uint64_t>> BWQueue;
+std::deque<Bucket> buckets;
+double delta = 0.3;
 
 const size_t NUM_PATHS = 2;
 std::vector<std::queue<uint64_t>> path_updating_queues(NUM_PATHS);
@@ -30,17 +53,126 @@ int starting_check = 1;
 
 static std::mutex FTRLMutex;
 static std::condition_variable ACKCondition;
+static std::condition_variable BWCondition;
 static std::condition_variable queueCondition;
 static std::condition_variable actionCondition;
 
 static std::atomic<bool> processingACK{true};
+static std::atomic<bool> processingBW{true};
 static std::atomic<bool> processingLoss{true};
 static std::atomic<bool> processingAction{true};
 static std::thread lossProcessingThread;
 static std::thread actionProcessingThread;
 static std::thread ACKProcessingThread;
+static std::thread BWProcessingThread;
 static std::atomic<bool> resetModel{true};
 static std::thread modelResetThread;
+
+void discardOldBuckets(int capacityToDiscard) {
+    int discardedCapacity = 0;
+
+    while (!buckets.empty() && discardedCapacity < capacityToDiscard) {
+        discardedCapacity += buckets.front().capacity;
+        buckets.pop_front();
+    }
+}
+
+bool testForChange(double recentMean, double olderMean, int recentCapacity, int olderCapacity, double total_variance, int totalCapacity) {
+    double m = (1.0 / recentCapacity) + (1.0 / olderCapacity);
+    double delta_m = delta / totalCapacity;
+    double epsilon = sqrt((1.0 / 2.0 * m) * log(4.0 / delta_m));
+
+    return fabs(recentMean - olderMean) > epsilon;
+}
+
+void checkForChange() {
+    double totalSum = 0.0;
+    double totalSumSquare = 0.0;
+    int totalCapacity = 0;
+
+    for (const auto& bucket : buckets) {
+        totalSum += bucket.sum;
+        totalSumSquare += bucket.sum_of_squares;
+        totalCapacity += bucket.capacity;
+    }
+
+    double recentSum = 0.0;
+    int recentCapacity = 0;
+
+    for (int i = buckets.size() - 1; i >= 0; --i) {
+        recentSum += buckets[i].sum;
+        recentCapacity += buckets[i].capacity;
+
+        int olderCapacity = totalCapacity - recentCapacity;
+        double olderSum = totalSum - recentSum;
+
+        if (olderCapacity > 0) {
+            double recentMean = recentSum / recentCapacity;
+            double olderMean = olderSum / olderCapacity;
+            double total_variance = (totalSumSquare / totalCapacity) - pow((totalSum / totalCapacity), 2);
+
+            if (testForChange(recentMean, olderMean, recentCapacity, olderCapacity, total_variance, totalCapacity)) {
+                discardOldBuckets(olderCapacity);
+                FTRL_instance->reset_t = 1;
+                if ((olderMean <= 0.5 && recentMean > 0.5) || (olderMean > 0.5 && recentMean <= 0.5)) {
+                    FTRL_instance->sum_g = 0;
+                    FTRL_instance->sum_g_without_lr = 0;
+                }
+                break;
+            }
+        }
+    }
+}
+
+void mergeLastTwoBuckets(int currentIndex) {
+    Bucket& last = buckets[currentIndex];
+    Bucket& second_last = buckets[currentIndex - 1];
+
+    int new_capacity = last.capacity + second_last.capacity;
+    double new_sum = last.sum + second_last.sum;
+    double new_sum_of_squares = last.sum_of_squares + second_last.sum_of_squares;
+
+    buckets[currentIndex - 1] = Bucket(new_capacity, new_sum, new_sum_of_squares);
+
+    buckets.pop_back();
+}
+
+void reorganizeBuckets() {
+    int currentIndex = buckets.size() - 1;
+
+    while (currentIndex > 0) {
+        int currentCapacity = buckets[currentIndex].capacity;
+        int previousCapacity = buckets[currentIndex - 1].capacity;
+
+        if (currentCapacity == previousCapacity) {
+            mergeLastTwoBuckets(currentIndex);
+            currentIndex--;
+        } else {
+            break;
+        }
+    }
+}
+
+void addDataPoint(double value) {
+    buckets.push_back(Bucket(value));
+    reorganizeBuckets();
+    checkForChange();
+}
+
+void processBW() {
+    while (processingBW) {
+        std::unique_lock<std::mutex> lock(FTRLMutex);
+        BWCondition.wait(lock, []{ return !BWQueue.empty() || !processingBW; });
+        
+        while (!BWQueue.empty() && FTRL_instance) {
+            auto BW_info = BWQueue.front();
+            BWQueue.pop();
+            double p0_ratio = static_cast<double>(std::get<0>(BW_info)) / (static_cast<double>(std::get<0>(BW_info)) + static_cast<double>(std::get<1>(BW_info)));
+            
+            addDataPoint(p0_ratio);
+        }
+    }
+}
 
 void processLoss() {
     while (processingLoss) {
@@ -139,7 +271,7 @@ void processACK() {
                                 throughput = throughput*(1 - actual_distribution) / (1 - expected_distribution);
                             }
                             
-                            double Lx = 1 - (throughput / bandwidth_sum);
+                            double Lx = pow(1 - (throughput / bandwidth_sum), 2);
                             if (throughput > bandwidth_sum) {
                                 Lx = 0;
                             }
@@ -176,9 +308,11 @@ void FTRL_initialize(int numActions) {
         processingLoss = true;
         processingAction = true;
         processingACK = true;
+        processingBW = true;
         lossProcessingThread = std::thread(processLoss);
         actionProcessingThread = std::thread(processAction);
         ACKProcessingThread = std::thread(processACK);
+        BWProcessingThread = std::thread(processBW);
         resetModel = true;
     }
 }
@@ -189,6 +323,14 @@ void FTRL_passACK(int path_id, uint64_t highestAckedPacket, int range, uint64_t 
         ACKQueue.push(std::make_tuple(path_id, highestAckedPacket, range, ack_received_time));
     }
     ACKCondition.notify_one();
+}
+
+void ADWIN2_passBW(uint64_t bw0, uint64_t bw1) { 
+    {
+        std::lock_guard<std::mutex> lock(FTRLMutex);
+        BWQueue.push(std::make_pair(bw0, bw1));
+    }
+    BWCondition.notify_one();
 }
 
 void FTRL_second_update() { 
