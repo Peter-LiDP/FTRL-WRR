@@ -14,10 +14,11 @@
 #include "globals.h"
 #include "wrapper.h"
 extern "C" {
-    bool updated = false;  
+    bool updated = false; 
+    double Xt = 0.5; 
 } 
 bool clearQueue = false;
-
+ 
 FTRL::FTRL(int numPaths)
     : numPaths(numPaths), lr(0.99), r(1), t(1), reset_t(1), updated_t(1), sum_g(0), sum_g_without_lr(0), currentWeights(numPaths, 0){
     effectiveWeight.resize(numPaths);
@@ -28,6 +29,7 @@ FTRL::FTRL(int numPaths)
     Ut = sampleUnitSphere();
     b = (r/2)*Ut*(1/sqrt(R));
     upper_Xt = lower_xt + b;
+    Xt = upper_Xt;
     RAtTimeStep[1] = R;
     bAtTimeStep[1] = b;
     resetWRR = true;
@@ -69,6 +71,7 @@ void FTRL::second_timestep_update() {
     Ut = sampleUnitSphere();
     b = (r/2)*Ut*(1/sqrt(R));
     upper_Xt = lower_xt + b;
+    Xt = upper_Xt;
     bAtTimeStep[t] = b;
     RAtTimeStep[t] = R;
     resetWRR = true;
@@ -95,6 +98,7 @@ void FTRL::update(const double loss, int updating_timestep) {
     Ut = sampleUnitSphere();
     b = (r/2)*Ut*pow(R, -0.5);
     upper_Xt = lower_xt + b;  
+    Xt = upper_Xt;
     bAtTimeStep[t] = b;
     RAtTimeStep[t] = R;
     XtAtTimeStep[t] = upper_Xt;    

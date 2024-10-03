@@ -6,7 +6,7 @@
 * Permission to use, copy, modify, and distribute this software for any
 * purpose with or without fee is hereby granted, provided that the above
 * copyright notice and this permission notice appear in all copies.
-* 
+*
 * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -985,23 +985,32 @@ static void picoquic_update_pacing_bucket(picoquic_path_t * path_x, uint64_t cur
 int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path_t * path_x, uint64_t current_time, uint64_t * next_time)
 {
     int ret = 1;
+
     picoquic_update_pacing_bucket(path_x, current_time);
-    bool path0_congested = false;
-    bool path1_congested = false;
-    if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
-        if (cnx->path[0]->bytes_in_transit > cnx->path[0]->cwin) {
-            path0_congested = true;
+
+    if (path_x->pacing_bucket_nanosec < path_x->pacing_packet_time_nanosec) {
+        uint64_t next_pacing_time;
+        int64_t bucket_required;
+        
+        if (cnx->quic->packet_train_mode || path_x->pacing_bandwidth_pause) {
+            bucket_required = path_x->pacing_bucket_max;
+
+            if (bucket_required > 10 * path_x->pacing_packet_time_nanosec) {
+                bucket_required = 10 * path_x->pacing_packet_time_nanosec;
+            }
+            
+            bucket_required -= path_x->pacing_bucket_nanosec;
         }
-        if (cnx->path[1]->bytes_in_transit > cnx->path[1]->cwin) {
-            path1_congested = true;
+        else {
+            bucket_required = path_x->pacing_packet_time_nanosec - path_x->pacing_bucket_nanosec;
         }
-    }
-    
-    if ((path_x->bytes_in_transit < path_x->cwin) && ((path_x->unique_path_id == 0 && (credit0 >= 1 || path1_congested || challenge_path0)) || (path_x->unique_path_id == 1 && (credit1 >= 1 || path0_congested || challenge_path1)) || !this_end_is_sender)) {
-        ret = 1;
-    }
-    else {
-        *next_time = current_time;
+
+        next_pacing_time = current_time + 1 + bucket_required / 1000;
+        if (next_pacing_time < *next_time) {
+            path_x->pacing_bandwidth_pause = 0;
+            *next_time = next_pacing_time;
+            SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
+        }
         ret = 0;
     }
 
@@ -4104,6 +4113,7 @@ int picoquic_prepare_segment(picoquic_cnx_t* cnx, picoquic_path_t* path_x, picoq
  * so congestion controlled data is not sent on standby path, and delay
  * sensitive data is not sent on suspect paths.
  */
+
 void initialize() {
     if (!initialized) {
         FTRL_initialize(2); 
@@ -4123,10 +4133,12 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
     uint64_t highest_retransmit = UINT64_MAX;
     uint64_t last_sent_pacing = UINT64_MAX;
     uint64_t last_sent_cwin = UINT64_MAX;
-    int i; 
+    int i;
     int i_min_rtt = -1;
     int is_min_rtt_pacing_ok = 0;
     int is_ack_needed = 0;
+    picoquic_stream_head_t* next_stream = picoquic_find_ready_stream(cnx);
+    int affinity_path_id = -1;
     bool use_challenge_path = false;
     initialize();
 
@@ -4144,7 +4156,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
         if (cnx->path[i]->path_is_demoted) {
             continue;
         }
-        else if (cnx->path[i]->challenge_failed) { 
+        else if (cnx->path[i]->challenge_failed) {
             picoquic_demote_path(cnx, i, current_time);
             continue;
         }
@@ -4164,7 +4176,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
                     break;
                 }
                 else if (next_challenge_time < challenge_time_next) {
-                    challenge_time_next = next_challenge_time; 
+                    challenge_time_next = next_challenge_time;
                 }
             }
             else if (cnx->path[i]->challenge_verified && cnx->path[i]->nb_retransmit > 0 && 
@@ -4175,7 +4187,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
             }
             if (cnx->path[i]->challenge_verified) {
                 int is_polled = 0;
-                int is_new_priority = 0; 
+                int is_new_priority = 0;
                 /* Set the congestion algorithm for the new path */
                 if (cnx->congestion_alg != NULL && cnx->path[i]->congestion_alg_state == NULL) {
                     cnx->congestion_alg->alg_init(cnx, cnx->path[i], current_time);
@@ -4189,7 +4201,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
                     if (cnx->path[i]->nb_retransmit < highest_retransmit) {
                         is_polled = 1;
                         is_new_priority = 1;
-                    } 
+                    }
                     else if (cnx->path[i]->nb_retransmit == highest_retransmit) {
                         is_polled = 1;
                     }
@@ -4204,7 +4216,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
                     last_sent_pacing = UINT64_MAX;
                     last_sent_cwin = UINT64_MAX;
                     i_min_rtt = -1;
-                    is_min_rtt_pacing_ok = 0; 
+                    is_min_rtt_pacing_ok = 0;
                 }
                 if (is_polled) {
                     /* This path is a candidate for min rtt */
@@ -4215,7 +4227,7 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
                         i_min_rtt = i;
                         is_min_rtt_pacing_ok = 0;
                     }
-                    cnx->path[i]->polled++; 
+                    cnx->path[i]->polled++;
                     if (picoquic_is_sending_authorized_by_pacing(cnx, cnx->path[i], current_time, &pacing_time_next)) {
                         if (cnx->path[i]->last_sent_time < last_sent_pacing) {
                             last_sent_pacing = cnx->path[i]->last_sent_time;
@@ -4229,6 +4241,17 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
                             if (cnx->path[i]->last_sent_time < last_sent_cwin) {
                                 last_sent_cwin = cnx->path[i]->last_sent_time;
                                 data_path_cwin = i;
+                            }
+                            if (affinity_path_id < 0) {
+                                /* we select here the first path that is either ready to send on
+                                 * the highest priority stream with affinity on this path, or
+                                 * ready to send datagrams on this path. */
+                                if (next_stream != NULL && cnx->path[i] == next_stream->affinity_path) {
+                                    affinity_path_id = i;
+                                }
+                                else if (cnx->path[i]->is_datagram_ready || cnx->is_datagram_ready) {
+                                    affinity_path_id = i;
+                                }
                             }
                         }
                         else {
@@ -4254,22 +4277,21 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
 
     if (challenge_path >= 0) {
         path_id = challenge_path;
-        use_challenge_path = true;
-        if (challenge_path == 0) {
-            challenge_path0 = true;
-        }
-        if (challenge_path == 1) {
-            challenge_path1 = true;
-        }
     }
-    else if (is_ack_needed && is_min_rtt_pacing_ok) {
+    else if (!this_end_is_sender && is_min_rtt_pacing_ok) {
         path_id = i_min_rtt;
     }
     else if (data_path_cwin >= 0) {
-        path_id = data_path_cwin;
+        /* if there is a path ready to send the most urgent data, select it */
+        if (affinity_path_id >= 0) {
+            path_id = affinity_path_id;
+        }
+        else {
+            path_id = data_path_cwin;
+        }
     }
     else if (data_path_pacing >= 0) {
-        path_id = data_path_pacing;   
+        path_id = data_path_pacing;
     }
     else {
         uint64_t path_wake_time = pacing_time_next;
@@ -4280,51 +4302,19 @@ static int picoquic_select_next_path_mp(picoquic_cnx_t* cnx, uint64_t current_ti
             *next_wake_time = path_wake_time;
             SET_LAST_WAKE(cnx->quic, PICOQUIC_SENDER);
         }
-        path_id = 0;    
-    }  
-      
+        path_id = 0;
+    }
+    
     if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2 && path0init == true && path1init == true && !use_challenge_path) {
         probing_finished = true; 
         path0mtu = cnx->path[0]->send_mtu;
         path1mtu = cnx->path[1]->send_mtu; 
-        path_id = -1; 
-        if (credit0 < 1 && credit1 < 1) { 
-            FTRL_drawAction(&result);
-            if (result.value == 0) {
-                credit0 = result.count; 
-            }
-            else if (result.value == 1) {
-                credit1 = result.count;
-            }
-            path_id = result.value;
-        }
-        
-        if (result.value == 0 && cnx->path[0]->bytes_in_transit > cnx->path[0]->cwin) {
-            path_id = 1;
-            if(cnx->path[1]->bytes_in_transit > cnx->path[1]->cwin) {
-                path_id = result.value;
-            }
-        }
-        else if (result.value == 0 && credit0 > 0){
-            path_id = result.value;
-        }
-        
-        
-        if (result.value == 1 && cnx->path[1]->bytes_in_transit > cnx->path[1]->cwin) {
-            path_id = 0;
-            if(cnx->path[0]->bytes_in_transit > cnx->path[0]->cwin) {
-                path_id = result.value;
-            }
-        }
-        else if (result.value == 1 && credit1 > 0){
-            path_id = result.value;
-        }
-        
+        FTRL_drawAction(&result);
         this_end_is_sender = true;
-
     }
 
     cnx->path[path_id]->selected++;
+
     return path_id;
 }
 

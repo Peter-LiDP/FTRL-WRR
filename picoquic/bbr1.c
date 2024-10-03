@@ -248,6 +248,7 @@ static const double bbr1_pacing_gain_cycle[BBR1_GAIN_CYCLE_LEN] = { 1.0, 1.0, 1.
 
 typedef struct st_picoquic_bbr1_state_t {
     picoquic_bbr1_alg_state_t state;
+    picoquic_path_t* path_ref;
     uint64_t btl_bw;
     uint64_t next_round_delivered;
     uint64_t btl_bw_filter[BBR1_BTL_BW_FILTER_LENGTH];
@@ -297,6 +298,13 @@ typedef struct st_picoquic_bbr1_state_t {
     unsigned int is_suspension_nearly_over : 1; /* Suspension likely over, waiting for ACK before repeating data. */
 
 } picoquic_bbr1_state_t;
+
+typedef struct {
+    double btl_bw_path_0;
+    double btl_bw_path_1;
+} bbr1_path_bw_t;
+
+static bbr1_path_bw_t path_bw_values;
 
 void BBR1ltbwSampling(picoquic_bbr1_state_t* bbr1_state, picoquic_path_t* path_x, uint64_t current_time);
 static void BBR1ResetProbeBwMode(picoquic_bbr1_state_t* bbr1_state, uint64_t current_time);
@@ -384,6 +392,7 @@ static void picoquic_bbr1_reset(picoquic_bbr1_state_t* bbr1_state, picoquic_path
     bbr1_state->cycle_stamp = current_time;
     bbr1_state->cycle_index = 0;
     bbr1_state->cycle_start = 0;
+    bbr1_state->path_ref = path_x;
 
     BBR1EnterStartup(bbr1_state);
     BBR1SetSendQuantum(bbr1_state, path_x);
@@ -909,9 +918,41 @@ void BBR1UpdateModelAndState(picoquic_bbr1_state_t* bbr1_state, picoquic_path_t*
     BBR1CheckProbeRTT(bbr1_state, path_x, bytes_in_transit, current_time);
 }
 
-void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
+/*void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
 {
     double rate = pacing_gain * (double)BBR1GetBtlBW(bbr1_state);
+
+    if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
+        bbr1_state->pacing_rate = rate;
+    }
+}*/
+
+void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
+{
+    double current_bw = (double)BBR1GetBtlBW(bbr1_state);
+    if (bbr1_state->path_ref->unique_path_id == 0) {
+        path_bw_values.btl_bw_path_0 = current_bw;
+    }
+    else if (bbr1_state->path_ref->unique_path_id == 1) {
+        path_bw_values.btl_bw_path_1 = current_bw;
+    }
+    
+    if (this_end_is_sender && current_bw != 0) {
+        if (bbr1_state->path_ref->unique_path_id == 0) {
+            double estimate_path1_bw_ratio = path_bw_values.btl_bw_path_1 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            if (estimate_path1_bw_ratio > 1 - Xt) {
+                current_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
+            }
+        }
+        else if (bbr1_state->path_ref->unique_path_id == 1) {
+            double estimate_path0_bw_ratio = path_bw_values.btl_bw_path_0 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            if (estimate_path0_bw_ratio > Xt) {
+                current_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
+            }
+        }
+    }
+    
+    double rate = 1.25 * current_bw;
 
     if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
         bbr1_state->pacing_rate = rate;

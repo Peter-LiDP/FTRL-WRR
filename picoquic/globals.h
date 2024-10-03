@@ -14,12 +14,14 @@ extern bool path1init;
 extern uint64_t path0mtu;
 extern uint64_t path1mtu;
 extern bool probing_finished;
+extern bool this_end_is_sender;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 extern bool updated;
+extern double Xt;
 
 #ifdef __cplusplus
 }
