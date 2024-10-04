@@ -926,7 +926,7 @@ int picoquic_is_sending_authorized_by_pacing(picoquic_cnx_t * cnx, picoquic_path
         bool block_pacing_current = (path_x->pacing_bucket_nanosec < path_x->pacing_packet_time_nanosec);
         bool block_pacing_another = (cnx->path[another_path]->pacing_bucket_nanosec < cnx->path[another_path]->pacing_packet_time_nanosec);
         if (cnx->path[current_path]->rtt_sample <= cnx->path[another_path]->rtt_sample) {  
-            if (!congest_current || !block_pacing_current) {   
+            if (!congest_current && !block_pacing_current) {   
                 sending_ok = true; 
             }
         } else {   
