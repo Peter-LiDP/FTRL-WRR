@@ -952,7 +952,7 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
         }
     }
     
-    double rate = 1.25 * current_bw;
+    double rate = 0.75 * current_bw;
 
     if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
         bbr1_state->pacing_rate = rate;
