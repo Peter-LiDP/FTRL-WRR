@@ -918,15 +918,6 @@ void BBR1UpdateModelAndState(picoquic_bbr1_state_t* bbr1_state, picoquic_path_t*
     BBR1CheckProbeRTT(bbr1_state, path_x, bytes_in_transit, current_time);
 }
 
-/*void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
-{
-    double rate = pacing_gain * (double)BBR1GetBtlBW(bbr1_state);
-
-    if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
-        bbr1_state->pacing_rate = rate;
-    }
-}*/
-
 void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
 {
     double current_bw = (double)BBR1GetBtlBW(bbr1_state);
@@ -939,20 +930,14 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
     
     if (this_end_is_sender && current_bw != 0) {
         if (bbr1_state->path_ref->unique_path_id == 0) {
-            double estimate_path1_bw_ratio = path_bw_values.btl_bw_path_1 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
-            if (estimate_path1_bw_ratio > 1 - Xt) {
-                current_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
-            }
+            current_bw = Xt * (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
         }
         else if (bbr1_state->path_ref->unique_path_id == 1) {
-            double estimate_path0_bw_ratio = path_bw_values.btl_bw_path_0 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
-            if (estimate_path0_bw_ratio > Xt) {
-                current_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
-            }
+            current_bw = (1 - Xt) * (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
         }
     }
     
-    double rate = 0.75 * current_bw;
+    double rate = pacing_gain * current_bw;
 
     if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
         bbr1_state->pacing_rate = rate;
