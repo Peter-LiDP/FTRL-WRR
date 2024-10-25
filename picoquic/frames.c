@@ -28,6 +28,7 @@
 #include "globals.h"
 #include "wrapper.h"
 
+int pacing_decreasing_t = 0;
 static const size_t challenge_length = 8;
 
 uint64_t new_ack_on_path0 = 0;
@@ -2510,6 +2511,7 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
                         }
                         if (path_x->unique_path_id == 1 && bw_update) {
                             ADWIN2_passBW(cnx->path[0]->bandwidth_estimate, cnx->path[1]->bandwidth_estimate);
+                            pacing_decreasing_t++;
                             bw_update = false;
                         }
                     }

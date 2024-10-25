@@ -32,6 +32,7 @@ FTRL::FTRL(int numPaths)
     Xt = upper_Xt;
     RAtTimeStep[1] = R;
     bAtTimeStep[1] = b;
+    rAtTimeStep[1] = r;
     resetWRR = true;
 }
 
@@ -46,10 +47,12 @@ double calculate_lr(double t) {
     return eta;
 }
 
-double calculate_r(double t) {
+double calculate_r(double t, double x) {
     double logt = log(t);
     double radius = pow(2, 0.5)*pow(t, -0.25)*pow(logt, 0.25);
-    return std::min(radius, 1.0);
+    double scaled_r = std::min(radius, 1.0);
+    double distance_r = 0.1 * pow(2 * x * x - 2 * x + 1, 0.5) / (x - x * x);
+    return std::min(scaled_r, distance_r);
 }
 
 void FTRL::calculate_lower_xt() { 
@@ -74,6 +77,7 @@ void FTRL::second_timestep_update() {
     Xt = upper_Xt;
     bAtTimeStep[t] = b;
     RAtTimeStep[t] = R;
+    rAtTimeStep[t] = r;
     resetWRR = true;
     updated = true;
     clearQueue = true;
@@ -82,18 +86,19 @@ void FTRL::second_timestep_update() {
 
 void FTRL::update(const double loss, int updating_timestep) {
     t++;
-    double update_b, update_R;
+    double update_b, update_R, update_r;
     update_b = bAtTimeStep[updating_timestep];
     update_R = RAtTimeStep[updating_timestep];
+    update_r = rAtTimeStep[updating_timestep];
     bAtTimeStep.erase(updating_timestep);
     RAtTimeStep.erase(updating_timestep);
+    rAtTimeStep.erase(updating_timestep);
     lr = calculate_lr(reset_t + 1);
-    r = calculate_r(reset_t + 1);
     gt = (4*loss*update_R*update_b) / (r * r);
     sum_g_without_lr += gt;
     sum_g = sum_g_without_lr*lr;
     calculate_lower_xt();
-        
+    r = calculate_r(reset_t + 1, lower_xt);
     R = R_second_derivative(); 
     Ut = sampleUnitSphere();
     b = (r/2)*Ut*pow(R, -0.5);
@@ -101,6 +106,7 @@ void FTRL::update(const double loss, int updating_timestep) {
     Xt = upper_Xt;
     bAtTimeStep[t] = b;
     RAtTimeStep[t] = R;
+    rAtTimeStep[t] = r;
     XtAtTimeStep[t] = upper_Xt;    
     resetWRR = true;
     updated = true;

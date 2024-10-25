@@ -41,6 +41,7 @@ private:
     std::vector<double> effectiveWeight;
     std::map<int, double> bAtTimeStep;
     std::map<int, double> RAtTimeStep;
+    std::map<int, double> rAtTimeStep;
     double totalWeight;
     int t;
     bool resetWRR; 

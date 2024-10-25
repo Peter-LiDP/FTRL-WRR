@@ -22,6 +22,7 @@ extern "C" {
 
 extern bool updated;
 extern double Xt;
+extern int pacing_decreasing_t;
 
 #ifdef __cplusplus
 }

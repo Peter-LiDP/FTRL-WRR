@@ -24,6 +24,7 @@
 #include <string.h>
 #include "cc_common.h"
 #include "globals.h"
+#include <math.h>
 
 /*
 Implementation of the BBR1 algorithm, tuned for Picoquic.
@@ -921,6 +922,7 @@ void BBR1UpdateModelAndState(picoquic_bbr1_state_t* bbr1_state, picoquic_path_t*
 void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_gain)
 {
     double current_bw = (double)BBR1GetBtlBW(bbr1_state);
+    double actual_bw = current_bw;
     if (bbr1_state->path_ref->unique_path_id == 0) {
         path_bw_values.btl_bw_path_0 = current_bw;
     }
@@ -930,21 +932,24 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
     
     if (this_end_is_sender && current_bw != 0) {
         if (bbr1_state->path_ref->unique_path_id == 0) {
-            current_bw = Xt * (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            double estimate_path1_bw_ratio = path_bw_values.btl_bw_path_1 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            if (estimate_path1_bw_ratio > 1 - Xt) {
+                actual_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
+            }
+            double initial_bw = (Xt * 100000000) * exp(-0.005 * pacing_decreasing_t);
+            current_bw = fmax(actual_bw, initial_bw);
         }
         else if (bbr1_state->path_ref->unique_path_id == 1) {
-            current_bw = (1 - Xt) * (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            double estimate_path0_bw_ratio = path_bw_values.btl_bw_path_0 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
+            if (estimate_path0_bw_ratio > Xt) {
+                actual_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
+            }
+            double initial_bw = ((1 - Xt) * 100000000) * exp(-0.005 * pacing_decreasing_t);
+            current_bw = fmax(actual_bw, initial_bw);
         }
     }
     
-    double rate;
-    
-    if (bbr1_state->state == picoquic_bbr1_alg_probe_bw) {
-        rate = pacing_gain * current_bw;
-    }
-    else {
-        rate = 1.25 * current_bw;
-    }
+    double rate = pacing_gain * current_bw;
 
     if (bbr1_state->filled_pipe || rate > bbr1_state->pacing_rate){
         bbr1_state->pacing_rate = rate;
