@@ -30,6 +30,7 @@
 
 int pacing_decreasing_t = 0;
 static const size_t challenge_length = 8;
+int bandwidth_t = 1;
 
 uint64_t new_ack_on_path0 = 0;
 uint64_t new_ack_on_path1 = 0;
@@ -2507,11 +2508,13 @@ void picoquic_estimate_path_bandwidth(picoquic_cnx_t * cnx, picoquic_path_t* pat
                     path_x->bandwidth_estimate = bw_estimate;
                     if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
                         if (path_x->unique_path_id == 0) {
+                            updateBandwidth(bandwidth_t, 0, cnx->path[0]->bandwidth_estimate);
                             bw_update = true;
                         }
                         if (path_x->unique_path_id == 1 && bw_update) {
                             ADWIN2_passBW(cnx->path[0]->bandwidth_estimate, cnx->path[1]->bandwidth_estimate);
                             pacing_decreasing_t++;
+                            updateBandwidth(bandwidth_t, 1, cnx->path[1]->bandwidth_estimate);
                             bw_update = false;
                         }
                     }

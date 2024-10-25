@@ -902,21 +902,11 @@ static size_t picoquic_protect_packet(picoquic_cnx_t* cnx,
     if (cnx->data_sent > cnx->data_received && cnx->nb_paths == 2) {
         uint64_t actual_current_time = picoquic_current_time();
         if (path_x->unique_path_id == 0) {
-            if (path_x->bandwidth_estimate > highest_bandwidth0) {
-                highest_bandwidth0 = path_x->bandwidth_estimate;
-                updateBandwidth(result.t, 0, highest_bandwidth0);
-            }
-            credit0--;
             if (!start_time_checking) {
                 mapPacketNumberToCurrentTimeStep(0, sequence_number, result.t, (double)send_length, actual_current_time);
             }
         }
         if (path_x->unique_path_id == 1) {
-            if (path_x->bandwidth_estimate > highest_bandwidth1) {
-                highest_bandwidth1 = path_x->bandwidth_estimate;
-                updateBandwidth(result.t, 1, highest_bandwidth1);
-            }
-            credit1--;
             if (!start_time_checking) {
                 mapPacketNumberToCurrentTimeStep(1, sequence_number, result.t, (double)send_length, actual_current_time);
             }

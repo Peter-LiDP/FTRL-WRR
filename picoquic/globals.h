@@ -23,6 +23,8 @@ extern "C" {
 extern bool updated;
 extern double Xt;
 extern int pacing_decreasing_t;
+extern int bandwidth_t;
+extern bool update_pause;
 
 #ifdef __cplusplus
 }

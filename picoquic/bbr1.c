@@ -26,6 +26,8 @@
 #include "globals.h"
 #include <math.h>
 
+bool update_pause = false;
+
 /*
 Implementation of the BBR1 algorithm, tuned for Picoquic.
 
@@ -936,7 +938,7 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
             if (estimate_path1_bw_ratio > 1 - Xt) {
                 actual_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
             }
-            double initial_bw = (Xt * 100000000) * exp(-0.005 * pacing_decreasing_t);
+            double initial_bw = (Xt * 100000000) * exp(-0.01 * pacing_decreasing_t);
             current_bw = fmax(actual_bw, initial_bw);
         }
         else if (bbr1_state->path_ref->unique_path_id == 1) {
@@ -944,7 +946,7 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
             if (estimate_path0_bw_ratio > Xt) {
                 actual_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
             }
-            double initial_bw = ((1 - Xt) * 100000000) * exp(-0.005 * pacing_decreasing_t);
+            double initial_bw = ((1 - Xt) * 100000000) * exp(-0.01 * pacing_decreasing_t);
             current_bw = fmax(actual_bw, initial_bw);
         }
     }
@@ -986,6 +988,7 @@ void BBR1ModulateCwndForProbeRTT(picoquic_bbr1_state_t* bbr1_state, picoquic_pat
     {
         if (path_x->cwin > BBR1_MIN_PIPE_CWND((uint64_t)path_x->send_mtu)) {
             path_x->cwin = BBR1_MIN_PIPE_CWND((uint64_t)path_x->send_mtu);
+            update_pause = true;
         }
     }
 }

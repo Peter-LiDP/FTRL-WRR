@@ -82,6 +82,7 @@ void FTRL::second_timestep_update() {
     updated = true;
     clearQueue = true;
     updated_t = t;
+    bandwidth_t = updated_t;
 }
 
 void FTRL::update(const double loss, int updating_timestep) {
@@ -94,7 +95,7 @@ void FTRL::update(const double loss, int updating_timestep) {
     RAtTimeStep.erase(updating_timestep);
     rAtTimeStep.erase(updating_timestep);
     lr = calculate_lr(reset_t + 1);
-    gt = (4*loss*update_R*update_b) / (r * r);
+    gt = (4*loss*update_R*update_b) / (update_r * update_r);
     sum_g_without_lr += gt;
     sum_g = sum_g_without_lr*lr;
     calculate_lower_xt();
@@ -112,6 +113,7 @@ void FTRL::update(const double loss, int updating_timestep) {
     updated = true;
     clearQueue = true;
     updated_t = t;
+    bandwidth_t = updated_t;
     reset_t++;
 }
 

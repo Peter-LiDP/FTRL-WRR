@@ -250,14 +250,14 @@ void processACK() {
                         }
                     }
                     if (FTRL_instance->TimestepMap.find(starting_check) != FTRL_instance->TimestepMap.end()) {
-                        auto firstEntry = FTRL_instance->TimestepMap[starting_check];
-                        auto& firstValue = firstEntry;
+                        auto& firstValue = FTRL_instance->TimestepMap[starting_check];
+                        auto& bw_m = FTRL_instance->bandwidth_mean[starting_check];
                         bool firstBool = std::get<1>(firstValue);
                         bool secondBool = std::get<2>(firstValue);
                         if (firstBool && secondBool) {
-                            uint64_t bandwidth_high0 = std::get<4>(firstValue);
-                            uint64_t bandwidth_high1 = std::get<5>(firstValue);
-                            double bandwidth_sum = (double)(bandwidth_high0 + bandwidth_high1) / (1000.0);
+                            double bandwidth_high0 = std::get<0>(bw_m) / std::get<1>(bw_m);
+                            double bandwidth_high1 = std::get<2>(bw_m) / std::get<3>(bw_m);
+                            double bandwidth_sum = (bandwidth_high0 + bandwidth_high1) / (1000.0);
                             uint64_t sent_start_time = std::get<0>(firstValue); 
                             double acked_bytes = std::get<3>(firstValue);
                             double time_interval = (double)(ack_received_time - sent_start_time - last_packet_sent_time + current_packet_sent_time) / 1000.0;
@@ -274,6 +274,10 @@ void processACK() {
                             double Lx = pow(1 - (throughput / bandwidth_sum), 2);
                             if (throughput > bandwidth_sum) {
                                 Lx = 0;
+                            }
+                            if (update_pause) {
+                                Lx = 0;
+                                update_pause = false;
                             }
                             int finished_timestep = starting_check;
                             lossQueue.push(std::make_pair(Lx, finished_timestep));
@@ -383,18 +387,21 @@ void mapPacketNumberToCurrentTimeStep(int path_id, uint64_t packetNumber, int cu
 void updateTimestep(int current_timestep, uint64_t start_time) {
     if (FTRL_instance) {
         FTRL_instance->TimestepMap[current_timestep] = std::make_tuple(start_time, false, false, 0.0, 0, 0, 0.0, 0.0);
+        FTRL_instance->bandwidth_mean[current_timestep] = std::make_tuple(0.0, 0.0, 0.0, 0.0);
     }
 }
 
-void updateBandwidth(int current_timestep, int path_id, uint64_t bandwidth_high) {
+void updateBandwidth(int current_timestep, int path_id, uint64_t bandwidth) {
     if (FTRL_instance) {
-        auto it = FTRL_instance->TimestepMap.find(current_timestep);
-        if (it != FTRL_instance->TimestepMap.end()) {
+        auto it = FTRL_instance->bandwidth_mean.find(current_timestep);
+        if (it != FTRL_instance->bandwidth_mean.end()) {
             if (path_id == 0) {
-                std::get<4>(it->second) = bandwidth_high;
+                std::get<0>(it->second) += 1.0;
+                std::get<1>(it->second) += 1.0 / static_cast<double>(bandwidth);
             }
             if (path_id == 1) {
-                std::get<5>(it->second) = bandwidth_high;
+                std::get<2>(it->second) += 1.0;
+                std::get<3>(it->second) += 1.0 / static_cast<double>(bandwidth);
             }
         }
     }
