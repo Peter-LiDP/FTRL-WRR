@@ -271,7 +271,7 @@ void processACK() {
                                 throughput = throughput*(1 - actual_distribution) / (1 - expected_distribution);
                             }
                             
-                            double Lx = pow(1 - (throughput / bandwidth_sum), 2);
+                            double Lx = 1 - (throughput / bandwidth_sum);
                             if (throughput > bandwidth_sum) {
                                 Lx = 0;
                             }
