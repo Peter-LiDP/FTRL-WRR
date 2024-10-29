@@ -936,18 +936,14 @@ void BBR1SetPacingRateWithGain(picoquic_bbr1_state_t* bbr1_state, double pacing_
         if (bbr1_state->path_ref->unique_path_id == 0) {
             double estimate_path1_bw_ratio = path_bw_values.btl_bw_path_1 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
             if (estimate_path1_bw_ratio > 1 - Xt) {
-                actual_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
+                current_bw = Xt * path_bw_values.btl_bw_path_1 / (1 - Xt);
             }
-            double initial_bw = (Xt * 100000000) * exp(-0.01 * pacing_decreasing_t);
-            current_bw = fmax(actual_bw, initial_bw);
         }
         else if (bbr1_state->path_ref->unique_path_id == 1) {
             double estimate_path0_bw_ratio = path_bw_values.btl_bw_path_0 / (path_bw_values.btl_bw_path_0 + path_bw_values.btl_bw_path_1);
             if (estimate_path0_bw_ratio > Xt) {
-                actual_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
+                current_bw = (1 - Xt) * path_bw_values.btl_bw_path_0 / Xt;
             }
-            double initial_bw = ((1 - Xt) * 100000000) * exp(-0.01 * pacing_decreasing_t);
-            current_bw = fmax(actual_bw, initial_bw);
         }
     }
     
