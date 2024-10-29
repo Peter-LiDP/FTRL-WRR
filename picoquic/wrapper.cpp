@@ -264,13 +264,7 @@ void processACK() {
                             double throughput = acked_bytes / time_interval;
                             double expected_distribution = FTRL_instance->XtAtTimeStep[starting_check];
                             double actual_distribution = std::get<6>(firstValue) / (std::get<6>(firstValue) + std::get<7>(firstValue));
-                            if (expected_distribution >= actual_distribution) {
-                                throughput = throughput*actual_distribution / expected_distribution;
-                            }
-                            else {
-                                throughput = throughput*(1 - actual_distribution) / (1 - expected_distribution);
-                            }
-                            
+                                
                             double Lx = 1 - (throughput / bandwidth_sum);
                             if (throughput > bandwidth_sum) {
                                 Lx = 0;
@@ -278,6 +272,9 @@ void processACK() {
                             if (update_pause) {
                                 Lx = 0;
                                 update_pause = false;
+                            }
+                            if (std::isnan(Lx)) {
+                                Lx = 0;
                             }
                             int finished_timestep = starting_check;
                             lossQueue.push(std::make_pair(Lx, finished_timestep));
