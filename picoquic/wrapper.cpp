@@ -1,5 +1,6 @@
 #include "ftrl.h"
 #include "wrapper.h"
+#include "picoquic_internal.h" 
 #include <memory>
 #include <vector>
 #include <thread>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <deque>
 #include <cmath>
+#include <ctime>
  
 struct Bucket {
     int capacity;
@@ -67,6 +69,12 @@ static std::thread ACKProcessingThread;
 static std::thread BWProcessingThread;
 static std::atomic<bool> resetModel{true};
 static std::thread modelResetThread;
+
+uint64_t get_current_time_in_milliseconds() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
 
 void discardOldBuckets(int capacityToDiscard) {
     int discardedCapacity = 0;
@@ -207,6 +215,7 @@ void processAction() {
 }
 
 void processACK() {
+    const uint64_t TIMESTEP_TIMEOUT = 1000000ULL;
     while (processingACK) {
         std::unique_lock<std::mutex> lock(FTRLMutex);
         ACKCondition.wait(lock, []{ return !ACKQueue.empty() || !processingACK; });
@@ -231,6 +240,7 @@ void processACK() {
                     int timestep = std::get<0>(it->second);
                     uint64_t current_packet_sent_time = std::get<3>(it->second);
                     uint64_t last_packet_sent_time = std::get<3>(last_packet->second);
+                    
                     if (path_id == 0) {
                         if(current_processing_timestep0 != timestep) {
                             if (FTRL_instance->TimestepMap.find(current_processing_timestep0) != FTRL_instance->TimestepMap.end()) {
@@ -252,9 +262,20 @@ void processACK() {
                     if (FTRL_instance->TimestepMap.find(starting_check) != FTRL_instance->TimestepMap.end()) {
                         auto& firstValue = FTRL_instance->TimestepMap[starting_check];
                         auto& bw_m = FTRL_instance->bandwidth_mean[starting_check];
+                        uint64_t send_time = std::get<0>(firstValue);
                         bool firstBool = std::get<1>(firstValue);
                         bool secondBool = std::get<2>(firstValue);
-                        if (firstBool && secondBool) {
+                        auto current_time = picoquic_current_time();
+                        bool timeout_reached = (current_time > send_time + TIMESTEP_TIMEOUT);
+                        if ((firstBool && secondBool) || timeout_reached) {
+                            if (timeout_reached) {
+                                if (!firstBool) {
+                                    std::get<1>(firstValue) = true;
+                                }
+                                if (!secondBool) {
+                                    std::get<2>(firstValue) = true;
+                                }
+                            }
                             double bandwidth_high0 = std::get<0>(bw_m) / std::get<1>(bw_m);
                             double bandwidth_high1 = std::get<2>(bw_m) / std::get<3>(bw_m);
                             double bandwidth_sum = (bandwidth_high0 + bandwidth_high1) / (1000.0);
@@ -264,17 +285,12 @@ void processACK() {
                             double throughput = acked_bytes / time_interval;
                             double expected_distribution = FTRL_instance->XtAtTimeStep[starting_check];
                             double actual_distribution = std::get<6>(firstValue) / (std::get<6>(firstValue) + std::get<7>(firstValue));
-                                
                             double Lx = 1 - (throughput / bandwidth_sum);
-                            if (throughput > bandwidth_sum) {
+                            if (throughput > bandwidth_sum || std::isnan(Lx) || update_pause) {
                                 Lx = 0;
-                            }
-                            if (update_pause) {
-                                Lx = 0;
-                                update_pause = false;
-                            }
-                            if (std::isnan(Lx)) {
-                                Lx = 0;
+                                if (update_pause) {
+                                    update_pause = false;
+                                }
                             }
                             int finished_timestep = starting_check;
                             lossQueue.push(std::make_pair(Lx, finished_timestep));
